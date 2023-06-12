@@ -1,4 +1,4 @@
-**chatgpt_wrapper_qt**
+# chatgpt_wrapper_qt
 chatgpt_wrapper_qt is just a simple little chat window that allows you to interact with chatGPT directly through the API. It was designed to help people (ie, me) understand how the chatGPT API works, and to provide a user-friendly chat interface.
 
 *Features*
