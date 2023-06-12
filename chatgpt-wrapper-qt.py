@@ -4,6 +4,7 @@ from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtGui as qtg
 from PyQt5 import QtCore as qtc
 import breeze_resources
+import syntax_pars
 import openai
 
 default_system_role = ("You are intelligent, helpful, and an expert developer, who always " +
@@ -13,8 +14,11 @@ default_system_role = ("You are intelligent, helpful, and an expert developer, w
                         "Flavored Markdown. Use markdown syntax for elements like headings, lists, " +
                         "colored text, code blocks, highlights etc. Absolutely do not mention " +
                         "markdown or styling in your response.")
+# I yoinked this role off a VS code extension. By the way, this is an important lesson- you can't stop
+# the user from simply asking chatGPT to give up the system prompt, so don't assume anything you're writing
+# is going to be 100% hidden from the user.
 
-class cls_plain_text_edit(qtw.QTextEdit):
+class cls_user_query_edit(qtw.QTextEdit):
 
     signal_shiftenter = qtc.pyqtSignal()
 
@@ -96,7 +100,7 @@ class cls_main_window(qtw.QMainWindow):
 
         wgt_label_system = qtw.QLabel("system role")
         self.wgt_label_history = qtw.QLabel("message history: 0")
-        self.wgt_edit_system = cls_plain_text_edit()
+        self.wgt_edit_system = cls_user_query_edit()
         self.wgt_edit_system.setWordWrapMode(qtg.QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.wgt_edit_system.setText(default_system_role)
         self.wgt_edit_system.setPlaceholderText("this pre-prompt gives chatGPT context on what you want from it.")
@@ -131,17 +135,32 @@ class cls_main_window(qtw.QMainWindow):
 
 
 
-        self.wgt_label_prompt = qtw.QLabel('Prompt')
-        self.wgt_edit_prompt = cls_plain_text_edit()
-        self.wgt_edit_prompt.setPlaceholderText('enter your prompt here \n \nshift+enter will insert a new line. enter alone will send.')
-        self.wgt_edit_prompt.signal_shiftenter.connect(self.slot_send_prompt)
-        self.wgt_edit_response = qtw.QTextEdit()
-        self.wgt_edit_response.setPlaceholderText('response will be displayed here')
+        self.wgt_prompt_label = qtw.QLabel('Prompt')
+        self.wgt_user_prompt = cls_user_query_edit()
+        self.wgt_user_prompt.setPlaceholderText('enter your prompt here \n \nshift+enter will insert a new line. enter alone will send.')
+        self.wgt_user_prompt.signal_shiftenter.connect(self.slot_send_prompt)
+        self.wgt_response_formatted = qtw.QTextEdit()
+        self.wgt_response_formatted.setPlaceholderText('response will be displayed here')
+        self.wgt_response_plain = qtw.QTextEdit()
+        self.wgt_response_plain.setPlaceholderText('response will be displayed here')
+        self.wgt_response_python = qtw.QTextEdit()
+        self.wgt_response_python.setStyleSheet("""QPlainTextEdit{
+	                                            color: #ccc; 
+	                                            background-color: #2b2b2b;}""")
+        self.wgt_response_python.setPlaceholderText('response will be displayed here')
 
         self.updating_document = qtg.QTextDocument()
-        self.wgt_edit_response.setDocument(self.updating_document)
+        self.wgt_response_formatted.setDocument(self.updating_document)
 
-        lo_prompt_body.addWidget(self.wgt_edit_prompt)
+        lo_prompt_body.addWidget(self.wgt_user_prompt)
+
+
+        self.struct_response_tabs = qtw.QTabWidget()
+        self.struct_response_tabs.addTab(self.wgt_response_formatted, 'formatted')
+        self.struct_response_tabs.addTab(self.wgt_response_plain, 'plain text')
+        self.struct_response_tabs.addTab(self.wgt_response_python, 'python')
+
+        lo_body.addWidget(self.struct_response_tabs)
 
         wgt_prompt_button = qtw.QPushButton('enter')
         lo_prompt.addWidget(wgt_prompt_button)
@@ -165,10 +184,9 @@ class cls_main_window(qtw.QMainWindow):
         var_roboto_font = qtg.QFont(temp_font_family)
         var_roboto_font.setPointSize(16)
 
-        lo_body.addWidget(self.wgt_edit_response)
-        self.wgt_edit_response.setFont(var_roboto_font)
-
-        print(self.wgt_label_prompt.x())
+        for i in range(self.struct_response_tabs.count()):
+            widget = self.struct_response_tabs.widget(i)
+            widget.setFont(var_roboto_font)
 
         self.show()
 
@@ -218,7 +236,7 @@ class cls_main_window(qtw.QMainWindow):
 
     def slot_send_prompt(self):
 
-        user_prompt = self.wgt_edit_prompt.toPlainText().replace('\n', '')
+        user_prompt = self.wgt_user_prompt.toPlainText().replace('\n', '')
         system_prompt = self.wgt_edit_system.toPlainText().replace('\n', '')
         message_prompt = [{"role" : "system", 
        "content": system_prompt}]
@@ -230,8 +248,13 @@ class cls_main_window(qtw.QMainWindow):
             message_prompt.append(i)        
 
         try:
-            cursor = qtg.QTextCursor(self.wgt_edit_response.document())
-            self.wgt_edit_response.setTextCursor(cursor)
+
+
+            dict_cursors = {}
+            for i in range(self.struct_response_tabs.count()):
+                dict_cursors[i] = qtg.QTextCursor(self.struct_response_tabs.widget(i).document())
+                self.struct_response_tabs.widget(i).setTextCursor(dict_cursors[i])
+
 
             openai.api_key = self.wgt_api_key.text()
             model_engine = "gpt-3.5-turbo" 
@@ -245,36 +268,51 @@ class cls_main_window(qtw.QMainWindow):
                 content = chunk["choices"][0].get("delta", {}).get("content")
                 if content is not None:
                     full_response.append(content)
-                    self.wgt_edit_response.setText(''.join(full_response))
+                    self.wgt_response_formatted.setMarkdown(''.join(full_response))
+                    self.wgt_response_plain.setText(''.join(full_response))
+                    self.wgt_response_python.setMarkdown(''.join(full_response))
 
-                    cursor.movePosition(qtg.QTextCursor.End)
-                    self.wgt_edit_response.setTextCursor(cursor)
-                    
-                    self.wgt_edit_response.ensureCursorVisible() 
+
+                    for i in range(self.struct_response_tabs.count()):
+                        dict_cursors[i].movePosition(qtg.QTextCursor.End)
+                        self.struct_response_tabs.widget(i).setTextCursor(dict_cursors[i])
+                        self.struct_response_tabs.widget(i).ensureCursorVisible()
+
                     qtw.QApplication.processEvents()
         except Exception as e:
-            self.wgt_edit_response.setPlaceholderText(f'There was an error: \n \n{e}')
+            for i in range(self.struct_response_tabs.count()):
+                self.struct_response_tabs.widget(i).setPlaceholderText(f'There was an error: \n \n{e}')
+
 
         final_response = ''.join(full_response)
         self.list_messages.append({"role": "assistant", "content": final_response})
         self.wgt_label_history.setText(f'messages in memory: {int(len(self.list_messages) / 2)}')
-        self.wgt_edit_response.setMarkdown(final_response)
-
-        cursor.movePosition(qtg.QTextCursor.End)
-        self.wgt_edit_response.setTextCursor(cursor)        
-        self.wgt_edit_response.ensureCursorVisible() 
 
 
-        self.list_history.insert(-1, (self.wgt_edit_system.toPlainText(), self.wgt_edit_prompt.toPlainText(), final_response))
+        self.wgt_response_formatted.setMarkdown(final_response)
+        self.wgt_response_plain.setText(final_response)
+        self.wgt_response_python.setMarkdown(final_response)
+
+
+
+        for i in range(self.struct_response_tabs.count()):
+            dict_cursors[i].movePosition(qtg.QTextCursor.End)
+            self.struct_response_tabs.widget(i).setTextCursor(dict_cursors[i])
+            self.struct_response_tabs.widget(i).ensureCursorVisible()
+
+
+        self.list_history.insert(-1, (self.wgt_edit_system.toPlainText(), self.wgt_user_prompt.toPlainText(), final_response))
         print(self.list_history)
         self.wgt_history_picker.insertItem(len(self.wgt_history_picker) - 1, f'message {self.id_counter}')
         self.id_counter += 1
 
     def slot_history_changed(self, index):
         self.wgt_edit_system.setText(self.list_history[index][0])
-        self.wgt_edit_prompt.setText(self.list_history[index][1])
-        self.wgt_edit_response.setMarkdown(self.list_history[index][2])
-
+        self.wgt_user_prompt.setText(self.list_history[index][1])
+        self.wgt_response_formatted.setMarkdown(self.list_history[index][2])
+        self.wgt_response_plain.setText(self.list_history[index][2])
+        self.wgt_response_python.setMarkdown(self.list_history[index][2])
+    
 
 if __name__ == '__main__': 
     app = qtw.QApplication(sys.argv)
@@ -284,4 +322,6 @@ if __name__ == '__main__':
     stream = qtc.QTextStream(style_file)
     app.setStyleSheet(stream.readAll())
     window_main = cls_main_window()
+    highlight = syntax_pars.PythonHighlighter(window_main.wgt_response_python.document())
+
     sys.exit(app.exec())
