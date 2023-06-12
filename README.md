@@ -1,5 +1,5 @@
-# chatgpt_wrapper_qt
-chatgpt_wrapper_qt is just a simple little chat window that allows you to interact with chatGPT directly through the API. It was designed to help people (ie, me) understand how the chatGPT API works, and to provide a user-friendly chat interface.
+# chatgpt-wrapper-qt
+chatgpt-wrapper-qt is just a simple little chat window that allows you to interact with chatGPT directly through the API. It was designed to help people (ie, me) understand how the chatGPT API works, and to provide a user-friendly chat interface.
 
 *Features*
 - Manual System Prompt: You can set the system prompt manually. The system prompt is a pre-prompt meant to prime chatGPT for what the user may query. For example, if you want to use chatGPT as an AI assistant for your website, the system prompt is where you explain what your website is, and tell it what sort of questions users might ask.
