@@ -18,13 +18,14 @@ default_system_role = ("You are intelligent, helpful, and an expert developer, w
 # the user from simply asking chatGPT to give up the system prompt, so don't assume anything you're writing
 # is going to be 100% hidden from the user.
 
+
 class cls_user_query_edit(qtw.QTextEdit):
 
-    signal_shiftenter = qtc.pyqtSignal()
+    signal_send_prompt = qtc.pyqtSignal()
 
     def __init__(self):
         super().__init__()
-     
+
     def insertFromMimeData(self, source):
         if source.hasText():
             # Removes formatting from pasted text.
@@ -32,7 +33,7 @@ class cls_user_query_edit(qtw.QTextEdit):
 
     def keyPressEvent(self, event):
         if event.key() in (qtc.Qt.Key_Enter, qtc.Qt.Key_Return) and event.modifiers() != qtc.Qt.ShiftModifier:
-            self.signal_shiftenter.emit()
+            self.signal_send_prompt.emit()
         else:
             super().keyPressEvent(event)
 
@@ -50,10 +51,14 @@ class cls_main_window(qtw.QMainWindow):
         self.list_messages = [] # A list of messages to send with each prompt
         self.list_history = [(default_system_role, '','')] # An internal record of messages in tuple form, (role, prompt, reply). 
                              # There should always be one blank tuple at the end to represent the current (unwritten) message.
-        self.id_counter = 1
+        self.message_counter = 1
 
-        self.settings = qtc.QSettings('most_ghost', 'chatgpt-wrapper-qt')
+        self.var_continue = True
+
+        self.settings = qtc.QSettings('most_ghost', 'chatgpt-wrapper-qt') # Only used to store the API key.
         self.setWindowTitle('chatgpt-wrapper-qt')
+
+        # WIDGETS - Top level
 
         struct_top = qtw.QWidget()
         lo_top = qtw.QVBoxLayout()
@@ -81,29 +86,39 @@ class cls_main_window(qtw.QMainWindow):
         self.wgt_api_key.setFocusPolicy(qtc.Qt.ClickFocus)
         lo_prompt.addWidget(self.wgt_api_key)
         self.wgt_api_key.setPlaceholderText('api key')
+        self.wgt_api_key.textChanged.connect(lambda: self.wgt_api_key.setText(self.wgt_api_key.text().strip()))
+        # This will get rid of any new lines or other assorted nasty if the user accidentally 
+        # puts them in while copy + pasting
 
         lo_prompt.addWidget(struct_prompt_body)
 
         temp_api = self.settings.value('--ghostconfig/api')
         self.wgt_api_key.setText(temp_api)
         del temp_api
-
         self.wgt_api_key.textEdited.connect(lambda: 
                 self.settings.setValue(f'--ghostconfig/api', f'{self.wgt_api_key.text()}')
         )
 
+        # WIDGETS - Left Pane - Settings
 
         struct_roles = qtw.QWidget()
-        lo_roles = qtw.QVBoxLayout()
-        struct_roles.setLayout(lo_roles)
+        lo_settings_pane = qtw.QVBoxLayout()
+        struct_roles.setLayout(lo_settings_pane)
         lo_prompt_body.addWidget(struct_roles)
-
+        
         wgt_label_system = qtw.QLabel("system role")
-        self.wgt_label_history = qtw.QLabel("message history: 0")
+
         self.wgt_edit_system = cls_user_query_edit()
         self.wgt_edit_system.setWordWrapMode(qtg.QTextOption.WrapAtWordBoundaryOrAnywhere)
         self.wgt_edit_system.setText(default_system_role)
         self.wgt_edit_system.setPlaceholderText("this pre-prompt gives chatGPT context on what you want from it.")
+
+
+        struct_history = qtw.QGroupBox('history')
+        lo_history = qtw.QVBoxLayout()
+        struct_history.setLayout(lo_history)
+
+        self.wgt_label_history = qtw.QLabel("messages: 0")
 
         struct_forget_buttons = qtw.QWidget()
         lo_forget_buttons = qtw.QHBoxLayout()
@@ -113,39 +128,123 @@ class cls_main_window(qtw.QMainWindow):
         self.wgt_remove_oldest.clicked.connect(self.slot_remove_oldest)
         self.wgt_remove_newest = qtw.QPushButton('forget newest')
         self.wgt_remove_newest.clicked.connect(self.slot_remove_newest)
-        self.wgt_label_temp = qtw.QLabel('temperature: 0.50')
-        self.wgt_temp_slider = qtw.QSlider(orientation=qtc.Qt.Horizontal)
-        self.wgt_temp_slider.setValue(50)
-        self.wgt_temp_slider.valueChanged.connect(self.slot_temperature_changed)
+
         self.wgt_history_picker = qtw.QComboBox()
         self.wgt_history_picker.addItem('new')
-        self.wgt_history_picker.activated.connect(self.slot_history_changed)        
+        self.wgt_history_picker.activated.connect(self.slot_history_changed) 
 
-        lo_roles.addWidget(wgt_label_system)
-        lo_roles.addWidget(self.wgt_edit_system)
-        lo_roles.addWidget(self.wgt_label_history)
-        
+        lo_history.addWidget(self.wgt_label_history)
         lo_forget_buttons.addWidget(self.wgt_remove_oldest)
         lo_forget_buttons.addWidget(self.wgt_remove_newest)
-        lo_roles.addWidget(struct_forget_buttons)
+        lo_history.addWidget(struct_forget_buttons)
+        lo_history.addWidget(self.wgt_history_picker)
 
-        lo_roles.addWidget(self.wgt_history_picker)
-        lo_roles.addWidget(self.wgt_label_temp)
-        lo_roles.addWidget(self.wgt_temp_slider)
+        
+        self.struct_spinbox_grid = qtw.QGroupBox('Parameters', checkable = True)
+        lo_spinbox_grid = qtw.QGridLayout()
+        self.struct_spinbox_grid.setLayout(lo_spinbox_grid)
+        self.struct_spinbox_grid.clicked.connect(self.slot_reset_params)
 
+
+
+
+        self.wgt_slider_freq = qtw.QSlider(orientation=qtc.Qt.Horizontal)
+        self.wgt_slider_freq.setValue(0)
+        self.wgt_slider_freq.setMinimum(-200)
+        self.wgt_slider_freq.setMaximum(200)
+        self.wgt_slider_freq.valueChanged.connect(self.slot_set_params_label)
+
+        self.wgt_slider_pres = qtw.QSlider(orientation=qtc.Qt.Horizontal)
+        self.wgt_slider_pres.setValue(0)
+        self.wgt_slider_pres.setMinimum(-200)
+        self.wgt_slider_pres.setMaximum(200)
+        self.wgt_slider_pres.valueChanged.connect(self.slot_set_params_label)
+
+        self.wgt_slider_temp = qtw.QSlider(orientation=qtc.Qt.Horizontal)
+        self.wgt_slider_temp.setValue(80)
+        self.wgt_slider_temp.setMaximum(200)
+        self.wgt_slider_temp.valueChanged.connect(self.slot_set_params_label)
+        self.wgt_label_params = qtw.QLabel("")
+        self.slot_set_params_label()
+
+        lo_spinbox_grid.addWidget(self.wgt_label_params, 0, 0, 1, 3)
+        lo_spinbox_grid.addWidget(qtw.QLabel('temperature'), 1, 0)
+        lo_spinbox_grid.addWidget(self.wgt_slider_temp, 1, 2)
+        lo_spinbox_grid.addWidget(qtw.QLabel('freq. penalty'), 2, 0)
+        lo_spinbox_grid.addWidget(self.wgt_slider_freq, 2, 2)
+        lo_spinbox_grid.addWidget(qtw.QLabel('pres. penalty'), 3, 0)
+        lo_spinbox_grid.addWidget(self.wgt_slider_pres, 3, 2)
+
+        stylesheet_dangerzone = """
+        QSlider::groove:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #BF1200, stop:0.2 #DD8605, stop:0.3 #005105, stop:0.7 #005105, stop:0.8 #DD8605, stop:1 #BF1200);
+        }
+
+        QSlider::add-page:horizontal {
+            background: transparent;
+        }
+
+        QSlider::sub-page:horizontal {
+            background: transparent;
+        }
+        
+        QSlider::handle:horizontal {
+            border: 2px solid #2f88b7;
+        }
+
+        """
+
+
+        stylesheet_dangerzone_temp = """
+        QSlider::groove:horizontal {
+            background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+                                        stop:0 #005105, stop:0.45 #005105, stop:0.6 #DD8605, stop:1 #BF1200);
+        }
+
+        QSlider::add-page:horizontal {
+            background: transparent;
+        }
+
+        QSlider::sub-page:horizontal {
+            background: transparent;
+        }
+
+        QSlider::handle:horizontal {
+            border: 2px solid #2f88b7;
+        }
+
+        """
+
+        self.wgt_slider_freq.setStyleSheet(stylesheet_dangerzone)
+        self.wgt_slider_pres.setStyleSheet(stylesheet_dangerzone)
+        self.wgt_slider_temp.setStyleSheet(stylesheet_dangerzone_temp)
+
+
+        lo_settings_pane.addWidget(wgt_label_system)
+        lo_settings_pane.addWidget(self.wgt_edit_system)
+        lo_settings_pane.addWidget(struct_history)
+        lo_settings_pane.addWidget(self.struct_spinbox_grid)
+
+
+        # WIDGETS - Middle Pane - Prompt
 
 
         self.wgt_prompt_label = qtw.QLabel('Prompt')
         self.wgt_user_prompt = cls_user_query_edit()
-        self.wgt_user_prompt.setPlaceholderText('enter your prompt here \n \nshift+enter will insert a new line. enter alone will send.')
-        self.wgt_user_prompt.signal_shiftenter.connect(self.slot_send_prompt)
+        self.wgt_user_prompt.setPlaceholderText('type in your prompt here \n \nshift+enter will insert a new line. enter alone will send.')
+        self.wgt_user_prompt.signal_send_prompt.connect(self.slot_send_prompt)
+
+
+        # WIDGETS - Right Pane - Response
+
+
         self.wgt_response_formatted = qtw.QTextEdit()
         self.wgt_response_formatted.setPlaceholderText('response will be displayed here')
         self.wgt_response_plain = qtw.QTextEdit()
         self.wgt_response_plain.setPlaceholderText('response will be displayed here')
         self.wgt_response_python = qtw.QTextEdit()
-        self.wgt_response_python.setStyleSheet("""QPlainTextEdit{
-	                                            color: #ccc; 
+        self.wgt_response_python.setStyleSheet("""QTextEdit{ 
 	                                            background-color: #2b2b2b;}""")
         self.wgt_response_python.setPlaceholderText('response will be displayed here')
 
@@ -154,7 +253,6 @@ class cls_main_window(qtw.QMainWindow):
 
         lo_prompt_body.addWidget(self.wgt_user_prompt)
 
-
         self.struct_response_tabs = qtw.QTabWidget()
         self.struct_response_tabs.addTab(self.wgt_response_formatted, 'formatted')
         self.struct_response_tabs.addTab(self.wgt_response_plain, 'plain text')
@@ -162,33 +260,71 @@ class cls_main_window(qtw.QMainWindow):
 
         lo_body.addWidget(self.struct_response_tabs)
 
-        wgt_prompt_button = qtw.QPushButton('enter')
-        lo_prompt.addWidget(wgt_prompt_button)
+        wgt_prompt_button = qtw.QPushButton('send')
         wgt_prompt_button.clicked.connect(self.slot_send_prompt)
 
-        self.var_temp = 0.50
+        wgt_prompt_stop = qtw.QPushButton('stop')
+        wgt_prompt_stop.clicked.connect(self.slot_stop_prompt)
+        wgt_prompt_stop.setStyleSheet("""
+        QPushButton {
+            background-color: #801515;
+            border-color: #ff252b;
+            } """)
 
-        temp_font_id = qtg.QFontDatabase.addApplicationFont(
-            os.path.join(
-            os.path.dirname(__file__), "monofonto.otf"))
-        temp_font_family = qtg.QFontDatabase.applicationFontFamilies(temp_font_id)[0]
-        var_typewriter_font = qtg.QFont(temp_font_family)
-        var_typewriter_font.setPointSize(16)
+        struct_send_strip = qtw.QWidget()
+        lo_send_strip = qtw.QHBoxLayout()
+        struct_send_strip.setLayout(lo_send_strip)
 
-        self.func_recursive_font(self, var_typewriter_font)
+        lo_send_strip.addWidget(wgt_prompt_button, 3)
+        lo_send_strip.addWidget(wgt_prompt_stop, 1)
+        lo_prompt.addWidget(struct_send_strip)
 
-        temp_font_id = qtg.QFontDatabase.addApplicationFont(
-            os.path.join(
-            os.path.dirname(__file__), "roboto.ttf"))
-        temp_font_family = qtg.QFontDatabase.applicationFontFamilies(temp_font_id)[0]
-        var_roboto_font = qtg.QFont(temp_font_family)
-        var_roboto_font.setPointSize(16)
 
-        for i in range(self.struct_response_tabs.count()):
-            widget = self.struct_response_tabs.widget(i)
-            widget.setFont(var_roboto_font)
+        # FONTS
+
+        font_typewriter = self.func_make_font("monofonto.otf", 16)
+
+        self.func_recursive_font(self, font_typewriter)
+
+        font_roboto = self.func_make_font("roboto.ttf", 16)
+        font_roboto_small = self.func_make_font("roboto.ttf", 13)
+        font_roboto_mono = self.func_make_font("robotomono.ttf", 13)
+        self.wgt_response_formatted.setFont(font_roboto)
+        self.wgt_response_plain.setFont(font_roboto_small)
+        self.wgt_response_python.setFont(font_roboto_mono)
+
 
         self.show()
+
+
+    def func_code_formatting(self, text):
+        # Some simple code formatting. Or rather, non-code formatting, to get non-code text out of the way.)
+
+        final_response = text[:].split('\n')
+        code_flag = False
+        code_response = []
+        for line in final_response:
+            if line[:9] == '```python`' or line[:3] == '```':
+                code_flag = not code_flag # inverts code_flag
+                continue
+            elif line == "":
+                code_response.append(line)
+                continue
+            elif code_flag == True:
+                code_response.append(line)
+            elif code_flag == False:
+                code_response.append("# || " + line)
+        return code_response
+    
+
+    def func_make_font(self, font_name, size):
+        temp_font_id = qtg.QFontDatabase.addApplicationFont(
+            os.path.join(
+            os.path.dirname(__file__), font_name))
+        temp_font_family = qtg.QFontDatabase.applicationFontFamilies(temp_font_id)[0]
+        font = qtg.QFont(temp_font_family)
+        font.setPointSize(size)
+        return font
 
 
     def func_recursive_font(self, widget, font):
@@ -196,11 +332,6 @@ class cls_main_window(qtw.QMainWindow):
 
         for child_widget in widget.findChildren(qtw.QWidget):
             self.func_recursive_font(child_widget, font)
-
-
-    def slot_temperature_changed(self):
-        self.var_temp = float(f"0.{self.wgt_temp_slider.value()}")
-        self.wgt_label_temp.setText(f'temperature: {self.var_temp}')
 
 
     def slot_remove_oldest(self):
@@ -212,9 +343,7 @@ class cls_main_window(qtw.QMainWindow):
             self.wgt_label_history.setText(f'messages in memory: {int(len(self.list_messages) / 2)}')
 
         if len(self.list_history) > 1:
-            print('Pop!')
             self.list_history.pop(0)
-            print(self.list_history)
             self.wgt_history_picker.removeItem(0)
 
 
@@ -228,9 +357,7 @@ class cls_main_window(qtw.QMainWindow):
             self.wgt_label_history.setText(f'messages in memory: {int(len(self.list_messages) / 2)}')
 
         if len(self.list_history) > 1:
-            print('Pop!')
             self.list_history.pop(-2) # Pop the one before the latest message
-            print(self.list_history)
             self.wgt_history_picker.removeItem(len(self.wgt_history_picker) - 2)
 
 
@@ -261,16 +388,21 @@ class cls_main_window(qtw.QMainWindow):
 
             for chunk in openai.ChatCompletion.create(
             model = model_engine,
-            temperature = self.var_temp,
+            temperature = round(self.wgt_slider_temp.value() / 100, 2),
             max_tokens = 2048,
             messages = message_prompt,
+            frequency_penalty = round(self.wgt_slider_freq.value() / 100, 2),
+            presence_penalty = round(self.wgt_slider_pres.value() / 100, 2),
             stream=True):
                 content = chunk["choices"][0].get("delta", {}).get("content")
-                if content is not None:
+                if content is not None and self.var_continue == True:
                     full_response.append(content)
                     self.wgt_response_formatted.setMarkdown(''.join(full_response))
                     self.wgt_response_plain.setText(''.join(full_response))
-                    self.wgt_response_python.setMarkdown(''.join(full_response))
+                    intermediate_response = ''.join(full_response)
+
+                    code_response = self.func_code_formatting(intermediate_response)
+                    self.wgt_response_python.setText("\n".join(code_response))
 
 
                     for i in range(self.struct_response_tabs.count()):
@@ -279,6 +411,10 @@ class cls_main_window(qtw.QMainWindow):
                         self.struct_response_tabs.widget(i).ensureCursorVisible()
 
                     qtw.QApplication.processEvents()
+                
+                elif self.var_continue == False:
+                    break
+
         except Exception as e:
             for i in range(self.struct_response_tabs.count()):
                 self.struct_response_tabs.widget(i).setPlaceholderText(f'There was an error: \n \n{e}')
@@ -291,7 +427,9 @@ class cls_main_window(qtw.QMainWindow):
 
         self.wgt_response_formatted.setMarkdown(final_response)
         self.wgt_response_plain.setText(final_response)
-        self.wgt_response_python.setMarkdown(final_response)
+    
+        code_response = self.func_code_formatting(final_response)
+        self.wgt_response_python.setText("\n".join(code_response))
 
 
 
@@ -302,17 +440,50 @@ class cls_main_window(qtw.QMainWindow):
 
 
         self.list_history.insert(-1, (self.wgt_edit_system.toPlainText(), self.wgt_user_prompt.toPlainText(), final_response))
-        print(self.list_history)
-        self.wgt_history_picker.insertItem(len(self.wgt_history_picker) - 1, f'message {self.id_counter}')
-        self.id_counter += 1
+        self.wgt_history_picker.insertItem(len(self.wgt_history_picker) - 1, f'message {self.message_counter}')
+        self.message_counter += 1
+
+    def slot_stop_prompt(self):
+        self.var_continue = False
+        qtc.QTimer.singleShot(10, self.slot_reset_stop)
+
+    def slot_reset_stop(self):
+        self.var_continue = True
+
+    def slot_reset_params(self):
+        self.struct_spinbox_grid.setChecked(True)
+        self.wgt_slider_temp.setValue(80)
+        self.slot_set_params_label()
+        self.wgt_slider_freq.setValue(0)
+        self.wgt_slider_pres.setValue(0)
+        # This is a bit jank but whatever, 
+        # this is supposed to only be for me so I don't feel like doing this properly.
+
+    def slot_set_params_label(self):
+        temp = f'{self.wgt_slider_temp.value() / 100:.2f}'
+        freq = f'{self.wgt_slider_freq.value() / 100:.2f}'
+        pres = f'{self.wgt_slider_pres.value() / 100:.2f}'
+
+        if freq[:1] != "-":
+            freq = " " + freq
+
+        if pres[:1] != "-":
+            pres = " " + pres
+
+        self.wgt_label_params.setText(
+        f't: {temp} f:{freq} p:{pres}')
+
+        
+
+
 
     def slot_history_changed(self, index):
         self.wgt_edit_system.setText(self.list_history[index][0])
         self.wgt_user_prompt.setText(self.list_history[index][1])
         self.wgt_response_formatted.setMarkdown(self.list_history[index][2])
         self.wgt_response_plain.setText(self.list_history[index][2])
-        self.wgt_response_python.setMarkdown(self.list_history[index][2])
-    
+        code_response = self.func_code_formatting(self.list_history[index][2])
+        self.wgt_response_python.setText("\n".join(code_response))
 
 if __name__ == '__main__': 
     app = qtw.QApplication(sys.argv)
