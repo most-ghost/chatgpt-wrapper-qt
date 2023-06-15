@@ -3,8 +3,8 @@ import os
 from PyQt5 import QtWidgets as qtw
 from PyQt5 import QtGui as qtg
 from PyQt5 import QtCore as qtc
-import breeze_resources
-import syntax_pars
+import resources.breeze_resources
+import resources.syntax_pars as syntax_pars
 import openai
 
 default_system_role = ("You are intelligent, helpful, and an expert developer, who always " +
@@ -45,7 +45,7 @@ class cls_main_window(qtw.QMainWindow):
 
         self.setWindowIcon(qtg.QIcon(
             os.path.join(
-            os.path.dirname(__file__), "openai_logo.svg")))
+            os.path.dirname(__file__), "resources/openai_logo.svg")))
 
 
         self.list_messages = [] # A list of messages to send with each prompt
@@ -320,7 +320,7 @@ class cls_main_window(qtw.QMainWindow):
     def func_make_font(self, font_name, size):
         temp_font_id = qtg.QFontDatabase.addApplicationFont(
             os.path.join(
-            os.path.dirname(__file__), font_name))
+            os.path.dirname(__file__), f'resources/{font_name}'))
         temp_font_family = qtg.QFontDatabase.applicationFontFamilies(temp_font_id)[0]
         font = qtg.QFont(temp_font_family)
         font.setPointSize(size)
@@ -473,10 +473,7 @@ class cls_main_window(qtw.QMainWindow):
         self.wgt_label_params.setText(
         f't: {temp} f:{freq} p:{pres}')
 
-        
-
-
-
+    
     def slot_history_changed(self, index):
         self.wgt_edit_system.setText(self.list_history[index][0])
         self.wgt_user_prompt.setText(self.list_history[index][1])
