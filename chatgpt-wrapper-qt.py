@@ -161,7 +161,7 @@ class cls_main_window(qtw.QMainWindow):
         self.wgt_slider_pres.valueChanged.connect(self.slot_set_params_label)
 
         self.wgt_slider_temp = qtw.QSlider(orientation=qtc.Qt.Horizontal)
-        self.wgt_slider_temp.setValue(80)
+        self.wgt_slider_temp.setValue(70)
         self.wgt_slider_temp.setMaximum(200)
         self.wgt_slider_temp.valueChanged.connect(self.slot_set_params_label)
         self.wgt_label_params = qtw.QLabel("")
@@ -452,7 +452,7 @@ class cls_main_window(qtw.QMainWindow):
 
     def slot_reset_params(self):
         self.struct_spinbox_grid.setChecked(True)
-        self.wgt_slider_temp.setValue(80)
+        self.wgt_slider_temp.setValue(70)
         self.slot_set_params_label()
         self.wgt_slider_freq.setValue(0)
         self.wgt_slider_pres.setValue(0)
